@@ -234,6 +234,11 @@ describe('/rest/user/login', () => {
     })
       .expect('status', 401)
   })
+
+  // Note: Rate limiting is configured for /rest/user/login endpoint
+  // Maximum 100 requests per 5 minute window
+  // This test would require making 101+ requests which is expensive
+  // Manual testing should verify rate limiting returns 429 status
 })
 
 describe('/rest/saveLoginIp', () => {

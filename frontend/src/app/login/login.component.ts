@@ -116,7 +116,14 @@ export class LoginComponent implements OnInit {
         localStorage.removeItem('token')
         this.cookieService.remove('token')
         sessionStorage.removeItem('bid')
-        this.error = error
+        // Handle different error types (string or object)
+        if (typeof error === 'string') {
+          this.error = error
+        } else if (error.message) {
+          this.error = error.message
+        } else {
+          this.error = 'Login failed. Please try again.'
+        }
         this.userService.isLoggedIn.next(false)
         this.emailControl.markAsPristine()
         this.passwordControl.markAsPristine()
