@@ -586,7 +586,10 @@ restoreOverwrittenFilesWithOriginals().then(() => {
   }
 
   /* Custom Restful API */
-  app.post('/rest/user/login', login())
+  app.post('/rest/user/login',
+    rateLimit({ windowMs: 5 * 60 * 1000, max: 100 }),
+    login()
+  )
   app.get('/rest/user/change-password', changePassword())
   app.post('/rest/user/reset-password', resetPassword())
   app.get('/rest/user/security-question', securityQuestion())
