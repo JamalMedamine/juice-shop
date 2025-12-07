@@ -278,3 +278,127 @@ describe('/rest/saveLoginIp', () => {
       })
   })
 })
+
+describe('/rest/user/login - attempt limiting', () => {
+  const testEmail = 'attempt-test@' + config.get<string>('application.domain')
+  const wrongPassword = 'wrongpassword123'
+
+  it('POST login should track failed attempts and show remaining count', () => {
+    return frisby.post(REST_URL + '/user/login', {
+      headers: jsonHeader,
+      body: {
+        email: testEmail,
+        password: wrongPassword
+      }
+    })
+      .expect('status', 401)
+      .expect('jsonTypes', {
+        error: Joi.string(),
+        remaining: Joi.number()
+      })
+      .then(({ json }) => {
+        // Should have remaining attempts after first failure
+        expect(json.remaining).toBeGreaterThan(0)
+        expect(json.remaining).toBeLessThanOrEqual(5)
+      })
+  })
+
+  it('POST login should lockout after 5 failed attempts', async () => {
+    const uniqueEmail = 'lockout-test-' + Date.now() + '@test.com'
+    
+    // Make 5 failed login attempts
+    for (let i = 0; i < 5; i++) {
+      await frisby.post(REST_URL + '/user/login', {
+        headers: jsonHeader,
+        body: {
+          email: uniqueEmail,
+          password: wrongPassword
+        }
+      })
+        .expect('status', 401)
+    }
+    
+    // The 6th attempt should be locked out
+    return frisby.post(REST_URL + '/user/login', {
+      headers: jsonHeader,
+      body: {
+        email: uniqueEmail,
+        password: wrongPassword
+      }
+    })
+      .expect('status', 401)
+      .expect('jsonTypes', {
+        error: Joi.string()
+      })
+      .then(({ json }) => {
+        // Should show lockout message
+        expect(json.error).toMatch(/too many failed login attempts/i)
+      })
+  })
+
+  it('POST login should reset attempts after successful login', () => {
+    const uniqueEmail = 'reset-test-' + Date.now() + '@test.com'
+    
+    // Create a test user
+    return frisby.post(API_URL + '/Users', {
+      headers: jsonHeader,
+      body: {
+        email: uniqueEmail,
+        password: 'testPassword123!'
+      }
+    })
+      .expect('status', 201)
+      .then(() => {
+        // Make some failed attempts
+        return frisby.post(REST_URL + '/user/login', {
+          headers: jsonHeader,
+          body: {
+            email: uniqueEmail,
+            password: wrongPassword
+          }
+        })
+          .expect('status', 401)
+      })
+      .then(() => {
+        // Try another failed attempt
+        return frisby.post(REST_URL + '/user/login', {
+          headers: jsonHeader,
+          body: {
+            email: uniqueEmail,
+            password: wrongPassword
+          }
+        })
+          .expect('status', 401)
+      })
+      .then(() => {
+        // Now login successfully
+        return frisby.post(REST_URL + '/user/login', {
+          headers: jsonHeader,
+          body: {
+            email: uniqueEmail,
+            password: 'testPassword123!'
+          }
+        })
+          .expect('status', 200)
+      })
+      .then(() => {
+        // After successful login, should be able to make failed attempts again
+        return frisby.post(REST_URL + '/user/login', {
+          headers: jsonHeader,
+          body: {
+            email: uniqueEmail,
+            password: wrongPassword
+          }
+        })
+          .expect('status', 401)
+          .expect('jsonTypes', {
+            error: Joi.string(),
+            remaining: Joi.number()
+          })
+          .then(({ json }) => {
+            // Should have full attempts available again (4 remaining after 1 failed)
+            expect(json.remaining).toBe(4)
+          })
+      })
+  })
+})
