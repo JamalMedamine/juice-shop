@@ -9,6 +9,8 @@ interface LoginAttempt {
 }
 
 // In-memory store for login attempts (email-based tracking)
+// Note: This is a simple in-memory implementation suitable for single-instance deployments.
+// For production or multi-instance setups, consider using Redis or database-backed storage.
 const loginAttempts = new Map<string, LoginAttempt>()
 
 const MAX_ATTEMPTS = 5
@@ -83,7 +85,12 @@ export function getRemainingAttempts (email: string): number {
   const normalizedEmail = email.toLowerCase()
   const attempt = loginAttempts.get(normalizedEmail)
   
-  if (!attempt || isLockedOut(email)) {
+  if (!attempt) {
+    return MAX_ATTEMPTS
+  }
+  
+  // Check if locked without calling isLockedOut to avoid side effects
+  if (attempt.lockoutUntil !== null && Date.now() < attempt.lockoutUntil) {
     return 0
   }
   
