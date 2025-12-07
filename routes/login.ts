@@ -13,11 +13,14 @@ import { UserModel } from '../models/user'
 import * as models from '../models/index'
 import { type User } from '../data/types'
 import * as utils from '../lib/utils'
+import * as loginAttempts from '../lib/loginAttempts'
 
 // vuln-code-snippet start loginAdminChallenge loginBenderChallenge loginJimChallenge
 export function login () {
   function afterLogin (user: { data: User, bid: number }, res: Response, next: NextFunction) {
     verifyPostLoginChallenges(user) // vuln-code-snippet hide-line
+    // Reset login attempts on successful login
+    loginAttempts.resetAttempts(user.data.email)
     BasketModel.findOrCreate({ where: { UserId: user.data.id } })
       .then(([basket]: [BasketModel, boolean]) => {
         const token = security.authorize(user)
@@ -30,8 +33,19 @@ export function login () {
   }
 
   return (req: Request, res: Response, next: NextFunction) => {
+    const email = req.body.email || ''
+    
+    // Check if account is locked out
+    if (loginAttempts.isLockedOut(email)) {
+      const remainingTime = loginAttempts.getRemainingLockoutTime(email)
+      const minutes = Math.ceil(remainingTime / 60)
+      return res.status(401).json({
+        error: res.__('Too many failed login attempts. Please try again in {{minutes}} minute(s).', { minutes })
+      })
+    }
+    
     verifyPreLoginChallenges(req) // vuln-code-snippet hide-line
-    models.sequelize.query(`SELECT * FROM Users WHERE email = '${req.body.email || ''}' AND password = '${security.hash(req.body.password || '')}' AND deletedAt IS NULL`, { model: UserModel, plain: true }) // vuln-code-snippet vuln-line loginAdminChallenge loginBenderChallenge loginJimChallenge
+    models.sequelize.query(`SELECT * FROM Users WHERE email = '${email}' AND password = '${security.hash(req.body.password || '')}' AND deletedAt IS NULL`, { model: UserModel, plain: true }) // vuln-code-snippet vuln-line loginAdminChallenge loginBenderChallenge loginJimChallenge
       .then((authenticatedUser) => { // vuln-code-snippet neutral-line loginAdminChallenge loginBenderChallenge loginJimChallenge
         const user = utils.queryResultToJson(authenticatedUser)
         if (user.data?.id && user.data.totpSecret !== '') {
@@ -48,7 +62,22 @@ export function login () {
           // @ts-expect-error FIXME some properties missing in user - vuln-code-snippet hide-line
           afterLogin(user, res, next)
         } else {
-          res.status(401).send(res.__('Invalid email or password.'))
+          // Record failed login attempt
+          loginAttempts.recordFailedAttempt(email)
+          const remaining = loginAttempts.getRemainingAttempts(email)
+          
+          if (remaining > 0) {
+            res.status(401).json({
+              error: res.__('Invalid email or password.'),
+              remaining
+            })
+          } else {
+            const lockoutTime = loginAttempts.getRemainingLockoutTime(email)
+            const minutes = Math.ceil(lockoutTime / 60)
+            res.status(401).json({
+              error: res.__('Too many failed login attempts. Please try again in {{minutes}} minute(s).', { minutes })
+            })
+          }
         }
       }).catch((error: Error) => {
         next(error)
